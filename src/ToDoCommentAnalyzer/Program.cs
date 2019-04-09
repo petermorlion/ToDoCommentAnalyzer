@@ -64,6 +64,7 @@ namespace ToDoCommentAnalyzer
             var ranges = o.blame.ranges as IEnumerable<dynamic>;
             var range = ranges.SingleOrDefault(r => (int)r.startingLine <= input.LineNumber && (int)r.endingLine >= input.LineNumber);
             var committedDate = (DateTime)range.commit.committedDate;
+            var ageInDays = (DateTime.UtcNow - committedDate).Days;
 
             return new ToDoItem
             {
@@ -71,7 +72,8 @@ namespace ToDoCommentAnalyzer
                 Path = input.Path,
                 Position = input.Position,
                 LineNumber = input.LineNumber,
-                CommitDate = committedDate
+                CommitDate = committedDate,
+                AgeInDays = ageInDays
             };
         }
 
@@ -98,5 +100,6 @@ namespace ToDoCommentAnalyzer
         public int Position { get; set; }
         public int LineNumber { get; set; }
         public DateTime CommitDate { get; set; }
+        public int AgeInDays { get; set; }
     }
 }
