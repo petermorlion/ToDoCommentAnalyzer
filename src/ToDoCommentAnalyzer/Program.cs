@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Newtonsoft.Json.Linq;
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
@@ -17,11 +19,12 @@ namespace ToDoCommentAnalyzer
             };
 
             var result = await GetLineNumber(toDoItem);
-            result = await GetCommitDate(toDoItem);
+            result = await GetCommitDateAndAge(result);
             Console.WriteLine(result.LineNumber);
+            Console.WriteLine(result.CommitDate);
         }
 
-        private static async Task<ToDoItem> GetCommitDate(ToDoItem input)
+        private static async Task<ToDoItem> GetCommitDateAndAge(ToDoItem input)
         {
             var owner = input.Repository.Split("/")[0];
             var repository = input.Repository.Split("/")[1];
@@ -56,8 +59,20 @@ namespace ToDoCommentAnalyzer
 
             var response = await httpClient.SendAsync(request);
             var content = await response.Content.ReadAsStringAsync();
-            
-            return input;
+            dynamic data = JObject.Parse(content);
+            var o = data.data.repository["object"] as dynamic;
+            var ranges = o.blame.ranges as IEnumerable<dynamic>;
+            var range = ranges.SingleOrDefault(r => (int)r.startingLine <= input.LineNumber && (int)r.endingLine >= input.LineNumber);
+            var committedDate = (DateTime)range.commit.committedDate;
+
+            return new ToDoItem
+            {
+                Repository = input.Repository,
+                Path = input.Path,
+                Position = input.Position,
+                LineNumber = input.LineNumber,
+                CommitDate = committedDate
+            };
         }
 
         private static async Task<ToDoItem> GetLineNumber(ToDoItem input)
@@ -82,5 +97,6 @@ namespace ToDoCommentAnalyzer
         public string Path { get; set; }
         public int Position { get; set; }
         public int LineNumber { get; set; }
+        public DateTime CommitDate { get; set; }
     }
 }
