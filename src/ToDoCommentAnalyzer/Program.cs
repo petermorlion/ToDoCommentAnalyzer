@@ -1,6 +1,7 @@
 ﻿using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
@@ -11,17 +12,39 @@ namespace ToDoCommentAnalyzer
     {
         public static async Task Main(string[] args)
         {
-            var toDoItem = new ToDoItem
+            using (var fr = new FileStream(@"C:\Users\peter\Projects\ToDoCommentAnalyzer\data\bq-results-20190409-112119-si88464mntq.csv", FileMode.Open, FileAccess.Read))
             {
-                Repository = "00091701/ADFC-NewsApp-Mono",
-                Path = "NewsAppDroid/NewsAppDroid/BusLog/Database/Rss.cs",
-                Position = 7778
-            };
+                using (var stringReader = new StreamReader(fr))
+                {
+                    string line;
+                    while ((line = await stringReader.ReadLineAsync()) != null)
+                    {
+                        if (line.Contains("sample_repo_name"))
+                        {
+                            continue;
+                        }
 
-            var result = await GetLineNumber(toDoItem);
-            result = await GetCommitDateAndAge(result);
-            Console.WriteLine(result.LineNumber);
-            Console.WriteLine(result.CommitDate);
+                        try
+                        {
+                            var toDoItem = new ToDoItem
+                            {
+                                Repository = line.Split(',')[0],
+                                Path = line.Split(',')[1],
+                                Position = int.Parse(line.Split(',')[2])
+                            };
+
+                            var result = await GetLineNumber(toDoItem);
+                            result = await GetCommitDateAndAge(result);
+                            Console.WriteLine(result.AgeInDays);
+                        }
+                        catch (Exception e)
+                        {
+                            Console.WriteLine("Error");
+                        }
+                        
+                    }
+                }
+            }
         }
 
         private static async Task<ToDoItem> GetCommitDateAndAge(ToDoItem input)
