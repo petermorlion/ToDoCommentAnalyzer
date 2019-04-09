@@ -12,37 +12,42 @@ namespace ToDoCommentAnalyzer
     {
         public static async Task Main(string[] args)
         {
-            using (var fr = new FileStream(@"C:\Users\peter\Projects\ToDoCommentAnalyzer\data\bq-results-20190409-112119-si88464mntq.csv", FileMode.Open, FileAccess.Read))
+            using (var inputFile = new FileStream(@"C:\Users\peter\Projects\ToDoCommentAnalyzer\data\bq-results-20190409-112119-si88464mntq.csv", FileMode.Open, FileAccess.Read))
+            using (var streamReader = new StreamReader(inputFile))
+            using (var outputFile = new FileStream(@"C:\Users\peter\Projects\ToDoCommentAnalyzer\data\bq-results-20190409-112119-si88464mntq-results.csv", FileMode.OpenOrCreate, FileAccess.Write))
+            using (var streamWriter = new StreamWriter(outputFile))
             {
-                using (var stringReader = new StreamReader(fr))
+                string line;
+                int lineNumber = 1;
+                while ((line = await streamReader.ReadLineAsync()) != null)
                 {
-                    string line;
-                    while ((line = await stringReader.ReadLineAsync()) != null)
+                    if (line.Contains("sample_repo_name"))
                     {
-                        if (line.Contains("sample_repo_name"))
-                        {
-                            continue;
-                        }
-
-                        try
-                        {
-                            var toDoItem = new ToDoItem
-                            {
-                                Repository = line.Split(',')[0],
-                                Path = line.Split(',')[1],
-                                Position = int.Parse(line.Split(',')[2])
-                            };
-
-                            var result = await GetLineNumber(toDoItem);
-                            result = await GetCommitDateAndAge(result);
-                            Console.WriteLine(result.AgeInDays);
-                        }
-                        catch (Exception e)
-                        {
-                            Console.WriteLine("Error");
-                        }
-                        
+                        await streamWriter.WriteLineAsync("sample_repo_name,sample_path,line,age_in_days");
+                        lineNumber++;
+                        continue;
                     }
+
+                    var toDoItem = new ToDoItem
+                    {
+                        Repository = line.Split(',')[0],
+                        Path = line.Split(',')[1],
+                        Position = int.Parse(line.Split(',')[2])
+                    };
+
+                    try
+                    {
+                        var result = await GetLineNumber(toDoItem);
+                        result = await GetCommitDateAndAge(result);
+                        await streamWriter.WriteLineAsync($"{result.Repository},{result.Path},{result.LineNumber},{result.AgeInDays}");
+                        Console.WriteLine($"Analyzed {result.Repository},{result.Path},{result.LineNumber},{result.AgeInDays}");
+                        lineNumber++;
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine("Error at line " + lineNumber + ": " + e);
+                    }
+
                 }
             }
         }
