@@ -1,4 +1,8 @@
-﻿using Newtonsoft.Json.Linq;
+﻿using CsvHelper;
+using CsvHelper.Configuration;
+using CsvHelper.Configuration.Attributes;
+using CsvHelper.TypeConversion;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -12,51 +16,59 @@ namespace ToDoCommentAnalyzer
     {
         public static async Task Main(string[] args)
         {
-            using (var inputFile = new FileStream(@"C:\Users\peter\Projects\ToDoCommentAnalyzer\data\bq-results-20190409-112119-si88464mntq.csv", FileMode.Open, FileAccess.Read))
-            using (var streamReader = new StreamReader(inputFile))
-            using (var outputFile = new FileStream(@"C:\Users\peter\Projects\ToDoCommentAnalyzer\data\bq-results-20190409-112119-si88464mntq-results.csv", FileMode.OpenOrCreate, FileAccess.Write))
-            using (var streamWriter = new StreamWriter(outputFile))
+            try
             {
-                string line;
-                int lineNumber = 1;
-                while ((line = await streamReader.ReadLineAsync()) != null)
+                var csvConfiguration = new Configuration
                 {
-                    if (line.Contains("sample_repo_name"))
+                    MissingFieldFound = null,
+                    Delimiter = ",",
+                    HeaderValidated = null
+                };
+
+                using (var streamReader = new StreamReader(@"C:\Users\peter\Projects\ToDoCommentAnalyzer\data\bq-results-20190409-112119-si88464mntq.csv"))
+                using (var csvReader = new CsvReader(streamReader, csvConfiguration))
+                using (var streamWriter = new StreamWriter(@"C:\Users\peter\Projects\ToDoCommentAnalyzer\data\bq-results-20190409-112119-si88464mntq-results.csv"))
+                using (var csvWriter = new CsvWriter(streamWriter))
+                using (var errorLogWriter = new StreamWriter(@"C:\Users\peter\Projects\ToDoCommentAnalyzer\data\bq-results-20190409-112119-si88464mntq-errors.log"))
+                {
+                    var toDoComments = csvReader.GetRecords<ToDoComment>();
+                    int lineNumber = 1;
+                    var results = new List<ToDoComment>();
+                    foreach (var toDoComment in toDoComments)
                     {
-                        await streamWriter.WriteLineAsync("sample_repo_name,sample_path,line,age_in_days");
-                        lineNumber++;
-                        continue;
+                        try
+                        {
+                            var result = await GetLineNumber(toDoComment);
+                            result = await GetCommitDateAndAge(result);
+                            results.Add(result);
+                            await streamWriter.WriteLineAsync($"{result.Repository},{result.Path},{result.LineNumber},{result.AgeInDays}");
+                            lineNumber++;
+                            Console.WriteLine($"Analyzed {result.Repository},{result.Path},{result.LineNumber},{result.AgeInDays}");
+                        }
+                        catch (Exception e)
+                        {
+                            await errorLogWriter.WriteLineAsync($"Error at line {lineNumber}: {e}");
+                        }
                     }
 
-                    var toDoItem = new ToDoItem
-                    {
-                        Repository = line.Split(',')[0],
-                        Path = line.Split(',')[1],
-                        Position = int.Parse(line.Split(',')[2])
-                    };
-
-                    try
-                    {
-                        var result = await GetLineNumber(toDoItem);
-                        result = await GetCommitDateAndAge(result);
-                        await streamWriter.WriteLineAsync($"{result.Repository},{result.Path},{result.LineNumber},{result.AgeInDays}");
-                        Console.WriteLine($"Analyzed {result.Repository},{result.Path},{result.LineNumber},{result.AgeInDays}");
-                        lineNumber++;
-                    }
-                    catch (Exception e)
-                    {
-                        Console.WriteLine("Error at line " + lineNumber + ": " + e);
-                    }
-
+                    csvWriter.WriteRecords(results);
                 }
+            }
+            catch (TypeConverterException e)
+            {
+                Console.WriteLine($"Error at line {e.ReadingContext.RawRecord}");
+                throw;
             }
         }
 
-        private static async Task<ToDoItem> GetCommitDateAndAge(ToDoItem input)
+        private static async Task<ToDoComment> GetCommitDateAndAge(ToDoComment input)
         {
             var owner = input.Repository.Split("/")[0];
             var repository = input.Repository.Split("/")[1];
             var query = "{repository(owner: \\\"" + owner + "\\\", name: \\\"" + repository + "\\\") {"
+                        + " defaultBranchRef {"
+                            + "name"
+                        + "}"
                         + " object(expression: \\\"master\\\") {"
                             + " ... on Commit {"
                                 + " blame(path: \\\"" + input.Path + "\\\") {"
@@ -94,7 +106,7 @@ namespace ToDoCommentAnalyzer
             var committedDate = (DateTime)range.commit.committedDate;
             var ageInDays = (DateTime.UtcNow - committedDate).Days;
 
-            return new ToDoItem
+            return new ToDoComment
             {
                 Repository = input.Repository,
                 Path = input.Path,
@@ -105,13 +117,13 @@ namespace ToDoCommentAnalyzer
             };
         }
 
-        private static async Task<ToDoItem> GetLineNumber(ToDoItem input)
+        private static async Task<ToDoComment> GetLineNumber(ToDoComment input)
         {
             var httpClient = new HttpClient();
             var url = $"https://raw.githubusercontent.com/{input.Repository}/master/{input.Path}";
             var text = await httpClient.GetStringAsync(url);
             var lineNumber = text.Take(input.Position).Count(c => c == '\n') + 1;
-            return new ToDoItem
+            return new ToDoComment
             {
                 Repository = input.Repository,
                 Path = input.Path,
@@ -121,13 +133,21 @@ namespace ToDoCommentAnalyzer
         }
     }
 
-    internal class ToDoItem
+    internal class ToDoComment
     {
+        [Index(0)]
         public string Repository { get; set; }
+
+        [Index(1)]
         public string Path { get; set; }
+
+        [Index(2)]
         public int Position { get; set; }
+
         public int LineNumber { get; set; }
+
         public DateTime CommitDate { get; set; }
+
         public int AgeInDays { get; set; }
     }
 }
