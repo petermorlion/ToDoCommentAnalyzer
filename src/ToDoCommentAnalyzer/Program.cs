@@ -3,6 +3,7 @@ using CsvHelper.Configuration;
 using CsvHelper.Configuration.Attributes;
 using CsvHelper.TypeConversion;
 using Newtonsoft.Json.Linq;
+using Polly;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -27,9 +28,9 @@ namespace ToDoCommentAnalyzer
 
                 using (var streamReader = new StreamReader(@"C:\Users\peter\Projects\ToDoCommentAnalyzer\data\bq-results-20190409-112119-si88464mntq.csv"))
                 using (var csvReader = new CsvReader(streamReader, csvConfiguration))
-                using (var streamWriter = new StreamWriter(@"C:\Users\peter\Projects\ToDoCommentAnalyzer\data\bq-results-20190409-112119-si88464mntq-results.csv"))
+                using (var streamWriter = new StreamWriter(@"C:\Users\peter\Projects\ToDoCommentAnalyzer\data\bq-results-20190409-112119-si88464mntq-results(2).csv"))
                 using (var csvWriter = new CsvWriter(streamWriter))
-                using (var errorLogWriter = new StreamWriter(@"C:\Users\peter\Projects\ToDoCommentAnalyzer\data\bq-results-20190409-112119-si88464mntq-errors.log"))
+                using (var errorLogWriter = new StreamWriter(@"C:\Users\peter\Projects\ToDoCommentAnalyzer\data\bq-results-20190409-112119-si88464mntq-errors(2).log"))
                 {
                     var toDoComments = csvReader.GetRecords<ToDoComment>();
                     int lineNumber = 1;
@@ -38,16 +39,21 @@ namespace ToDoCommentAnalyzer
                     {
                         try
                         {
-                            var result = await GetLineNumber(toDoComment);
-                            result = await GetCommitDateAndAge(result);
-                            results.Add(result);
-                            await streamWriter.WriteLineAsync($"{result.Repository},{result.Path},{result.LineNumber},{result.AgeInDays}");
-                            lineNumber++;
-                            Console.WriteLine($"Analyzed {result.Repository},{result.Path},{result.LineNumber},{result.AgeInDays}");
+                            var policy = Policy.Handle<HttpRequestException>().Retry(2);
+                            await policy.Execute(async() => {
+                                var result = await GetLineNumber(toDoComment);
+                                result = await GetCommitDateAndAge(result);
+                                results.Add(result);
+                                Console.WriteLine($"Analyzed {result.Repository},{result.Path},{result.LineNumber},{result.AgeInDays}");
+                            });
                         }
                         catch (Exception e)
                         {
                             await errorLogWriter.WriteLineAsync($"Error at line {lineNumber}: {e}");
+                        }
+                        finally
+                        {
+                            lineNumber++;
                         }
                     }
 
