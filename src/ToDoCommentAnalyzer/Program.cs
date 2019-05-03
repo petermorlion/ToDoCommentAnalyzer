@@ -41,8 +41,10 @@ namespace ToDoCommentAnalyzer
                         {
                             var policy = Policy.Handle<HttpRequestException>().Retry(2);
                             await policy.Execute(async() => {
-                                var result = await GetLineNumber(toDoComment);
-                                result = await GetCommitDateAndAge(result);
+                                var graphQLData = await GetGraphQLData(toDoComment);
+                                var result = GetBaseToDoComment(toDoComment, graphQLData);
+                                result = await GetLineNumber(result);
+                                result = GetCommitDateAndAge(result, graphQLData);
                                 results.Add(result);
                                 Console.WriteLine($"Analyzed {result.Repository},{result.Path},{result.LineNumber},{result.AgeInDays}");
                             });
@@ -67,29 +69,36 @@ namespace ToDoCommentAnalyzer
             }
         }
 
-        private static async Task<ToDoComment> GetCommitDateAndAge(ToDoComment input)
+        private static async Task<dynamic> GetGraphQLData(ToDoComment input)
         {
             var owner = input.Repository.Split("/")[0];
             var repository = input.Repository.Split("/")[1];
             var query = "{repository(owner: \\\"" + owner + "\\\", name: \\\"" + repository + "\\\") {"
                         + " defaultBranchRef {"
-                            + "name"
-                        + "}"
-                        + " object(expression: \\\"master\\\") {"
-                            + " ... on Commit {"
-                                + " blame(path: \\\"" + input.Path + "\\\") {"
-                                    + " ranges {"
-                                        + " startingLine"
-                                        + " endingLine" 
-                                    + " commit {"
-                                            + " committedDate"
+                            + " name"
+                            + " target {"
+                                + " ... on Commit {"
+                                    + " history(first: 1) {"
+                                        + " edges {"
+                                            + " node {"
+                                                + " committedDate"
+                                            + "}"
+                                        + "}"
+                                    + "}"
+                                    + " blame(path: \\\"" + input.Path + "\\\") {"
+                                        + " ranges {"
+                                            + " startingLine"
+                                            + " endingLine"
+                                        + " commit {"
+                                                + " committedDate"
+                                        + " }"
                                     + " }"
                                 + " }"
                             + " }"
                         + " }"
                     + " }"
-                + " }"
-            + " }";
+                 + " }"
+             + " }";
 
             var httpClient = new HttpClient();
             var url = "https://api.github.com/graphql";
@@ -106,36 +115,49 @@ namespace ToDoCommentAnalyzer
             var response = await httpClient.SendAsync(request);
             var content = await response.Content.ReadAsStringAsync();
             dynamic data = JObject.Parse(content);
-            var o = data.data.repository["object"] as dynamic;
-            var ranges = o.blame.ranges as IEnumerable<dynamic>;
-            var range = ranges.SingleOrDefault(r => (int)r.startingLine <= input.LineNumber && (int)r.endingLine >= input.LineNumber);
-            var committedDate = (DateTime)range.commit.committedDate;
-            var ageInDays = (DateTime.UtcNow - committedDate).Days;
+
+            return data;            
+        }
+
+        private static ToDoComment GetBaseToDoComment(ToDoComment input, dynamic graphQLData)
+        {
+            var defaultBranchRef = graphQLData.data.repository.defaultBranchRef as dynamic;
+            var branchName = defaultBranchRef.name.Value;
 
             return new ToDoComment
             {
                 Repository = input.Repository,
                 Path = input.Path,
                 Position = input.Position,
-                LineNumber = input.LineNumber,
-                CommitDate = committedDate,
-                AgeInDays = ageInDays
+                BranchName = branchName
             };
+        }
+
+        private static ToDoComment GetCommitDateAndAge(ToDoComment input, dynamic graphQLData)
+        {
+            var defaultBranchRef = graphQLData.data.repository.defaultBranchRef as dynamic;
+            var branchName = defaultBranchRef.name;
+            var latestCommitDate = (DateTime)defaultBranchRef.target.history.edges[0].node.committedDate;
+            var ranges = defaultBranchRef.target.blame.ranges as IEnumerable<dynamic>;
+            var range = ranges.SingleOrDefault(r => (int)r.startingLine <= input.LineNumber && (int)r.endingLine >= input.LineNumber);
+            var committedDate = (DateTime)range.commit.committedDate;
+            var ageInDays = (latestCommitDate - committedDate).Days;
+
+            input.CommitDate = committedDate;
+            input.AgeInDays = ageInDays;
+
+            return input;
         }
 
         private static async Task<ToDoComment> GetLineNumber(ToDoComment input)
         {
             var httpClient = new HttpClient();
-            var url = $"https://raw.githubusercontent.com/{input.Repository}/master/{input.Path}";
+            var url = $"https://raw.githubusercontent.com/{input.Repository}/{input.BranchName}/{input.Path}";
             var text = await httpClient.GetStringAsync(url);
             var lineNumber = text.Take(input.Position).Count(c => c == '\n') + 1;
-            return new ToDoComment
-            {
-                Repository = input.Repository,
-                Path = input.Path,
-                Position = input.Position,
-                LineNumber = lineNumber
-            };
+
+            input.LineNumber = lineNumber;
+            return input;
         }
     }
 
@@ -150,10 +172,13 @@ namespace ToDoCommentAnalyzer
         [Index(2)]
         public int Position { get; set; }
 
+        public string BranchName { get; set; }
+
         public int LineNumber { get; set; }
 
         public DateTime CommitDate { get; set; }
 
         public int AgeInDays { get; set; }
+
     }
 }
