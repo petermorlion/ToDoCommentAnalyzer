@@ -46,7 +46,7 @@ namespace ToDoCommentAnalyzer
                                 result = await GetLineNumber(result);
                                 result = GetCommitDateAndAge(result, graphQLData);
                                 results.Add(result);
-                                Console.WriteLine($"Analyzed {result.Repository},{result.Path},{result.LineNumber},{result.AgeInDays}");
+                                Console.WriteLine($"{lineNumber} {result.Repository},{result.Path},{result.LineNumber},{result.AgeInDays}");
                             });
                         }
                         catch (Exception e)
